@@ -320,6 +320,8 @@ sudo usermod -aG dialout husky
 newgrp dialout
 ```
 
+> A common way to verify if everything is in place is that, you will have the **COMM** lights go *green*.
+
 Launch for complete testing:
 
 ```bash
@@ -435,3 +437,4 @@ sudo journalctl -u clearpath-robot -f
   - Ensure `/cmd_vel` is published and heard by the driver
 
 ---
+
