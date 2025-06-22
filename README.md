@@ -132,9 +132,60 @@ sudo apt install ros-humble-husky-desktop ros-humble-husky-robot
 ### 5. Robot Bringup & Launch
 
 The bringup of robot and launch involves a bit-more of steps as we do not have the config files loaded at `/etc` like we had earlier in the ROS1 system. Follow the below steps to achieve the desired configuration:
-#### Clearpath Husky Setup — Required files at /etc/clearpath along with the directory structure
+#### Install the core packages from clearpath robotics:
+
+```bash
+# Add public key
+wget https://packages.clearpathrobotics.com/public.key -O - | sudo apt-key add -
+
+# Add repo for Ubuntu 22.04 ("jammy")
+echo "deb https://packages.clearpathrobotics.com/stable/ubuntu jammy main" | \
+  sudo tee /etc/apt/sources.list.d/clearpath-latest.list
+
+sudo apt update
+
+sudo apt install \
+  ros-humble-clearpath-common \
+  ros-humble-clearpath-control \
+  ros-humble-clearpath-description \
+  ros-humble-clearpath-generator-common \
+  ros-humble-clearpath-platform
+```
+
+Create a robot.yaml file inside /etc/clearpath by,
+
+```bash
+sudo mkdir -p /etc/clearpath
+sudo touch /etc/clearpath/robot.yaml
+```
+
+Write the following into `/etc/clearpath/robot.yaml`
+
+```yaml
 
 ```
+
+After installing all this, switch to root access in the terminal by,
+
+```bash
+sudo -i
+source /opt/ros/humble/setup.bash
+
+# Make sure /etc/clearpath/robot.yaml exists before running these:
+
+ros2 run clearpath_generator_common generate_bash /etc/clearpath/robot.yaml
+ros2 run clearpath_generator_common generate_description /etc/clearpath/robot.yaml
+ros2 run clearpath_generator_common generate_semantic_description /etc/clearpath/robot.yaml
+ros2 run clearpath_generator_common generate_discovery_server /etc/clearpath/robot.yaml
+
+ros2 run clearpath_generator_robot generate_launch /etc/clearpath/robot.yaml
+ros2 run clearpath_generator_robot generate_param /etc/clearpath/robot.yaml
+```
+
+Done.
+#### Clearpath Husky Setup — Required files at /etc/clearpath along with the directory structure
+
+```text
 # Expected /etc/clearpath/ directory structure for ROS 2 Humble Husky
 
 /etc/clearpath/
@@ -180,7 +231,7 @@ The bringup of robot and launch involves a bit-more of steps as we do not have t
 
 But the catch here is that, all we need to create a `/etc/clearpath/robot.yaml` file and then run 
 
-```
+```bash
 # Clearpath Generator Commands for ROS 2 Humble
 
 # Make sure /etc/clearpath/robot.yaml exists before running these:
@@ -199,11 +250,81 @@ source /etc/clearpath/setup.bash
 ros2 launch clearpath_common bringup.launch.py
 ```
 
-This populates `/etc/clearpath` with the necessary files and folders required in the directory.
+This populates `/etc/clearpath` with the necessary files and folders required in the directory. We're almost there, we need to setup the permissions for the nodes to access the ports. First check if the ports are available by running, 
+
+```bash
+ls -l /dev/clearpath/
+```
+
+If the directory `/dev/clearpath/` or file `prolific` does not exist, then the serial port to the motor controller hasn't been mounted or created yet. This means that udev rules are missing and that can be added. First check the available USB connections by running,
+
+```bash
+dmesg | grep ttyUSB
+```
+
+This outputs something like
+```text
+[ 5.163344] usb 1-10: cp210x converter now attached to ttyUSB0 [ 5.164031] usb 1-2.3: pl2303 converter now attached to ttyUSB1 [ 5.166102] usb 1-2.2: cp210x converter now attached to ttyUSB2
+```
+
+ROS2 is failing because `/dev/clearpath/prolific` isn’t mapped to ttyUSB1, which uses the **pl2303 Prolific chipset**. That’s what Clearpath's ROS2  expect for Husky’s motor controller.
+Get the Vendor and Product ID for ttyUSB1:
+
+```bash
+udevadm info -a -n /dev/ttyUSB1 | grep '{idVendor}' -m 1
+udevadm info -a -n /dev/ttyUSB1 | grep '{idProduct}' -m 1
+```
+
+Expected result:
+
+```text
+ATTRS{idVendor}=="067b"
+ATTRS{idProduct}=="2303"
+```
+
+If your results vary, kindly note them down and change them in the upcoming steps. Now to create a udev rule,
+
+```bash
+sudo nano /etc/udev/rules.d/99-clearpath.rules
+```
+
+add the following line. 
+
+```bash
+SUBSYSTEM=="tty", ATTRS{idVendor}=="067b", ATTRS{idProduct}=="2303", SYMLINK+="clearpath/prolific", GROUP="dialout", MODE="0666"
+```
+
+Now perform the following steps line by line to finish setup of udev rules.
+
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+To verify run
+
+```bash
+ls -l /dev/clearpath/prolific
+```
+
+You should see the output like,
+
+```text
+/dev/clearpath/prolific → ../../ttyUSB1
+```
+
+Ensure you grant permissions to the user(here husky),
+
+```bash
+sudo usermod -aG dialout husky
+newgrp dialout
+```
+
+Launch for complete testing:
 
 ```bash
 source ~/husky_ws/install/setup.bash
-ros2 launch clearpath_common bringup.launch.py
+ros2 launch clearpath_platform platform.launch.py
 ```
 
 ---
@@ -314,4 +435,3 @@ sudo journalctl -u clearpath-robot -f
   - Ensure `/cmd_vel` is published and heard by the driver
 
 ---
-
